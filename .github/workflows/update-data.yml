@@ -1,0 +1,44 @@
+name: 更新股價與營收資料並部署網頁
+
+# 需要在 GitHub 專案 Settings → Pages 把 Source 設為「GitHub Actions」
+on:
+  schedule:
+    # UTC 時間；約台灣時間 16:10（收盤行情）與 21:40（晚間營收公告）
+    - cron: "10 8 * * *"
+    - cron: "40 13 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: update-data
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    environment:
+      name: github-pages
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: 抓取資料
+        run: python3 scripts/fetch_data.py
+      - name: 提交更新後的資料
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data
+          git diff --cached --quiet || git commit -m "更新資料 $(TZ=Asia/Taipei date '+%Y-%m-%d %H:%M')"
+          git push
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: .
+      - uses: actions/deploy-pages@v4

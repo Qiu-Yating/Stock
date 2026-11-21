@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>台股營收行事曆</title>
+  <link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <h1>台股營收行事曆</h1>
+      <span id="updated" class="muted"></span>
+    </div>
+    <div class="search">
+      <input id="search" type="search" placeholder="搜尋股票代號或名稱，例如 2330、台積電" autocomplete="off">
+      <ul id="suggest" class="suggest" hidden></ul>
+    </div>
+  </header>
+
+  <section id="soon" class="soon"></section>
+
+  <nav class="tabs">
+    <button class="tab active" data-tab="list">股票列表</button>
+    <button class="tab" data-tab="calendar">營收行事曆</button>
+  </nav>
+
+  <main>
+    <!-- 股票列表 -->
+    <section id="tab-list" class="panel">
+      <div class="filters">
+        <select id="f-market"><option value="">全部市場</option><option>上市</option><option>上櫃</option></select>
+        <select id="f-ind"><option value="">全部產業</option></select>
+        <label class="chk"><input type="checkbox" id="f-fav"> 只看自選</label>
+        <span id="count" class="muted"></span>
+      </div>
+      <div class="table-wrap">
+        <table id="table">
+          <thead>
+            <tr>
+              <th></th>
+              <th data-k="c">代號</th>
+              <th data-k="n">名稱</th>
+              <th data-k="m">市場</th>
+              <th data-k="ind">產業</th>
+              <th data-k="p" class="r">收盤</th>
+              <th data-k="pct" class="r">漲跌幅</th>
+              <th data-k="v" class="r">成交量(張)</th>
+              <th data-k="revYm">營收月份</th>
+              <th data-k="rev" class="r">月營收(億)</th>
+              <th data-k="yoy" class="r">年增率</th>
+              <th data-k="next">下次營收公布</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <div class="pager">
+        <button id="prev">上一頁</button>
+        <span id="pageinfo"></span>
+        <button id="next">下一頁</button>
+      </div>
+    </section>
+
+    <!-- 營收行事曆 -->
+    <section id="tab-calendar" class="panel" hidden>
+      <div class="cal-head">
+        <button id="cal-prev" aria-label="上個月">‹</button>
+        <h2 id="cal-title"></h2>
+        <button id="cal-next" aria-label="下個月">›</button>
+        <button id="cal-today" class="ghost">今天</button>
+        <label class="chk"><input type="checkbox" id="cal-fav"> 只看自選</label>
+        <span class="legend"><i class="dot actual"></i>已公布 <i class="dot est"></i>預估 <i class="dot due"></i>逾期未公布</span>
+      </div>
+      <div class="cal-layout">
+        <div>
+          <div class="cal-grid cal-dow"><div>日</div><div>一</div><div>二</div><div>三</div><div>四</div><div>五</div><div>六</div></div>
+          <div id="cal-grid" class="cal-grid"></div>
+        </div>
+        <aside id="cal-day" class="cal-day"></aside>
+      </div>
+      <p class="note">
+        依規定上市櫃公司須於每月 10 日前公布上月營收（遇假日順延）。
+        「已公布」日期由每日自動更新時偵測到新營收資料的日期記錄；
+        「預估」日期依該公司過去公布日的中位數推算，尚無紀錄者以法定期限顯示。
+      </p>
+    </section>
+  </main>
+
+  <!-- 個股技術圖 -->
+  <div id="modal" class="modal" hidden>
+    <div class="modal-box" role="dialog" aria-modal="true">
+      <div class="modal-head">
+        <div>
+          <button id="fav-btn" class="star" title="加入/移除自選">☆</button>
+          <span id="d-title" class="d-title"></span>
+          <span id="d-price" class="d-price"></span>
+        </div>
+        <button id="close" class="close" aria-label="關閉">×</button>
+      </div>
+      <div id="d-info" class="d-info"></div>
+      <div class="chart-ctrl">
+        <div class="ranges">
+          <button data-range="66">3個月</button>
+          <button data-range="130" class="active">6個月</button>
+          <button data-range="250">1年</button>
+          <button data-range="0">全部</button>
+        </div>
+        <div id="ma-toggles" class="ma-toggles"></div>
+      </div>
+      <div id="legend" class="chart-legend"></div>
+      <div id="chart" class="chart"></div>
+      <p class="note">股價為未還原權息之原始價格；均線以收盤價計算。</p>
+    </div>
+  </div>
+
+  <script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
+  <script src="assets/app.js"></script>
+</body>
+</html>
