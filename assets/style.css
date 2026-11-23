@@ -68,6 +68,12 @@ tbody tr:hover { background: var(--bg); }
 .pager button, .ghost, .cal-head button { padding: 5px 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); cursor: pointer; }
 .pager button:disabled { opacity: .4; cursor: default; }
 
+/* 均線排列 */
+.al { display: inline-block; font-size: 12px; padding: 1px 8px; border-radius: 999px; font-weight: 600; }
+.al-bull { background: rgba(224, 52, 47, .12); color: var(--up); }
+.al-bear { background: rgba(26, 152, 80, .12); color: var(--down); }
+.al-flat { background: var(--bg); color: var(--muted); border: 1px solid var(--line); }
+
 /* 產業排行榜 */
 .rank-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
 .rank-card { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }

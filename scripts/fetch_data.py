@@ -302,6 +302,12 @@ def build_stocks(companies, revenue, rev_dates):
                 prev = rows[-2][4]
                 co["chg"] = round(last[4] - prev, 2)
                 co["pct"] = round((last[4] - prev) / prev * 100, 2)
+            # 均線排列：MA20 > MA60 > MA120 為多頭排列(1)，反之為空頭排列(-1)，其餘為糾結(0)
+            if len(rows) >= 120:
+                closes = [r[4] for r in rows]
+                ma = {n: round(sum(closes[-n:]) / n, 2) for n in (20, 60, 120)}
+                co["ma"] = [ma[20], ma[60], ma[120]]
+                co["al"] = 1 if ma[20] > ma[60] > ma[120] else -1 if ma[20] < ma[60] < ma[120] else 0
         r = revenue.get(c)
         if r:
             co["rev"] = r
