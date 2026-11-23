@@ -23,7 +23,7 @@
     stocks: [],
     byCode: new Map(),
     revDates: {},
-    events: [],          // {date, s, ym, type: actual|est|due}
+    events: [],          // 實際公布：{date, s, ym}
     eventsByDate: new Map(),
     sortKey: "c", sortAsc: true, page: 0,
     favs: new Set(store.get("favs", [])),
@@ -44,14 +44,7 @@
   const mdLabel = d => `${+d.slice(5, 7)}/${+d.slice(8, 10)}（${DOW[new Date(d + "T00:00:00").getDay()]}）`;
   const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
-  function nextInfo(s) {
-    if (!s.next) return null;
-    const t = s.next.overdue ? "due" : "est";
-    return { date: s.next.overdue ? s.next.deadline : s.next.date, type: t, ym: s.next.ym };
-  }
-  function badge(type) {
-    return { actual: '<span class="badge actual">已公布</span>', est: '<span class="badge est">預估</span>', due: '<span class="badge due">逾期</span>' }[type];
-  }
+  const mcap = s => s.p != null && s.sh ? s.p * s.sh / 1e8 : null; // 市值（億元）
 
   // ---------------------------------------------------------------- 載入
   async function load() {
@@ -69,8 +62,10 @@
     const inds = [...new Set(st.stocks.map(s => s.ind))].sort((a, b) => a.localeCompare(b, "zh-Hant"));
     $("#f-ind").insertAdjacentHTML("beforeend", inds.map(i => `<option>${esc(i)}</option>`).join(""));
 
+    $("#rk-ind").insertAdjacentHTML("beforeend", inds.map(i => `<option>${esc(i)}</option>`).join(""));
     renderSoon();
     renderTable();
+    renderRank();
     const t = todayStr();
     state.calMonth = t.slice(0, 7);
     state.calSel = t;
@@ -83,8 +78,6 @@
     for (const s of state.stocks) {
       const hist = state.revDates[s.c] || {};
       for (const [ym, d] of Object.entries(hist)) if (d) ev.push({ date: d, s, ym, type: "actual" });
-      const n = nextInfo(s);
-      if (n) ev.push({ date: n.date, s, ym: n.ym, type: n.type });
     }
     state.events = ev;
     state.eventsByDate = new Map();
@@ -97,23 +90,15 @@
   // ---------------------------------------------------------------- 近期公布
   function renderSoon() {
     const t = todayStr();
-    const dates = [...state.eventsByDate.keys()].filter(d => d >= t).sort().slice(0, 4);
-    const todayActual = (state.eventsByDate.get(t) || []).filter(e => e.type === "actual");
-    let html = "";
-    if (todayActual.length) {
-      html += `<div><b>今日已公布營收（${todayActual.length} 家）：</b>${chips(todayActual)}</div>`;
-    }
-    const upcoming = dates.map(d => [d, (state.eventsByDate.get(d) || []).filter(e => e.type !== "actual")]).filter(([, l]) => l.length);
-    if (upcoming.length) {
-      html += `<div><b>即將公布營收：</b>` + upcoming.map(([d, l]) =>
-        `<span class="muted" style="font-size:13px;margin-left:6px">${mdLabel(d)} ${l.length} 家</span>`).join("") + `</div>`;
-      const first = upcoming[0][1];
-      html += `<div>${chips(first, 40)} <a href="#" id="soon-more" class="muted">查看行事曆 ›</a></div>`;
-    }
+    const recent = [...state.eventsByDate.keys()].filter(d => d <= t).sort().reverse().slice(0, 3);
+    if (!recent.length) { $("#soon").innerHTML = ""; return; }
+    const first = state.eventsByDate.get(recent[0]);
+    let html = `<div><b>最近公布營收：</b>` + recent.map(d =>
+      `<span class="muted" style="font-size:13px;margin-left:6px">${mdLabel(d)} ${state.eventsByDate.get(d).length} 家</span>`).join("") + `</div>`;
+    html += `<div>${chips(first, 40)} <a href="#" id="soon-more" class="muted">查看行事曆 ›</a></div>`;
     $("#soon").innerHTML = html;
     $$("#soon .chip").forEach(c => c.onclick = () => openStock(c.dataset.c));
-    const more = $("#soon-more");
-    if (more) more.onclick = e => { e.preventDefault(); state.calSel = upcoming[0][0]; state.calMonth = upcoming[0][0].slice(0, 7); switchTab("calendar"); renderCalendar(); };
+    $("#soon-more").onclick = e => { e.preventDefault(); state.calSel = recent[0]; state.calMonth = recent[0].slice(0, 7); switchTab("calendar"); renderCalendar(); };
   }
   function chips(list, max = 30) {
     const sorted = [...list].sort((a, b) => (state.favs.has(b.s.c) - state.favs.has(a.s.c)) || (b.s.v || 0) - (a.s.v || 0));
@@ -132,7 +117,8 @@
       case "revYm": return s.rev?.ym ?? "";
       case "rev": return s.rev?.rev ?? -Infinity;
       case "yoy": return s.rev?.yoy ?? -Infinity;
-      case "next": return nextInfo(s)?.date ?? "9999";
+      case "revDate": return s.rev?.date ?? "";
+      case "cap": return mcap(s) ?? -Infinity;
       case "p": case "pct": case "v": return s[k] ?? -Infinity;
       default: return s[k] ?? "";
     }
@@ -152,7 +138,6 @@
     const pages = Math.max(1, Math.ceil(list.length / PAGE));
     state.page = Math.min(state.page, pages - 1);
     const rows = list.slice(state.page * PAGE, (state.page + 1) * PAGE).map(s => {
-      const n = nextInfo(s);
       const r = s.rev;
       return `<tr data-c="${s.c}">
         <td><button class="star" data-fav="${s.c}">${state.favs.has(s.c) ? "★" : "☆"}</button></td>
@@ -160,13 +145,14 @@
         <td class="r ${cls(s.chg)}">${fmt(s.p)}</td>
         <td class="r ${cls(s.pct)}">${s.pct == null ? "—" : sign(s.pct) + fmt(s.pct) + "%"}</td>
         <td class="r">${fmt(s.v, 0)}</td>
-        <td>${r ? ymLabel(r.ym) + (r.date ? ` <span class="muted">${r.date.slice(5)}</span>` : "") : "—"}</td>
+        <td class="r">${fmt(mcap(s), 0)}</td>
+        <td>${r ? ymLabel(r.ym) : "—"}</td>
         <td class="r">${r ? fmt(r.rev / 1e5, 2) : "—"}</td>
         <td class="r ${cls(r?.yoy)}">${r?.yoy == null ? "—" : sign(r.yoy) + fmt(r.yoy) + "%"}</td>
-        <td>${n ? mdLabel(n.date) + badge(n.type) : "—"}</td>
+        <td>${r?.date ? mdLabel(r.date) : '<span class="muted">—</span>'}</td>
       </tr>`;
     }).join("");
-    $("#table tbody").innerHTML = rows || `<tr><td colspan="12" class="muted" style="text-align:center;padding:30px">查無符合的股票</td></tr>`;
+    $("#table tbody").innerHTML = rows || `<tr><td colspan="13" class="muted" style="text-align:center;padding:30px">查無符合的股票</td></tr>`;
     $("#count").textContent = `共 ${list.length} 檔`;
     $("#pageinfo").textContent = `${state.page + 1} / ${pages}`;
     $("#prev").disabled = state.page === 0;
@@ -198,14 +184,10 @@
       const ds = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
       if (i >= 35 && d.getMonth() !== m - 1) break;
       const list = (state.eventsByDate.get(ds) || []).filter(e => !favOnly || state.favs.has(e.s.c));
-      const c = { actual: 0, est: 0, due: 0 };
-      list.forEach(e => c[e.type]++);
       const top = [...list].sort((a, b) => (state.favs.has(b.s.c) - state.favs.has(a.s.c)) || (b.s.v || 0) - (a.s.v || 0)).slice(0, 3);
       html += `<div class="cell ${d.getMonth() !== m - 1 ? "other" : ""} ${ds === t ? "today" : ""} ${ds === state.calSel ? "sel" : ""}" data-d="${ds}">
         <div class="dn">${d.getDate()}</div>
-        ${c.actual ? `<div class="cnt"><i class="dot actual"></i>${c.actual}</div>` : ""}
-        ${c.est ? `<div class="cnt"><i class="dot est"></i>${c.est}</div>` : ""}
-        ${c.due ? `<div class="cnt"><i class="dot due"></i>${c.due}</div>` : ""}
+        ${list.length ? `<div class="cnt"><i class="dot actual"></i>${list.length} 家</div>` : ""}
         ${top.length ? `<div class="names">${top.map(e => esc(e.s.n)).join("、")}${list.length > 3 ? "…" : ""}</div>` : ""}
       </div>`;
     }
@@ -217,13 +199,11 @@
     const ds = state.calSel;
     const favOnly = $("#cal-fav").checked;
     const list = (state.eventsByDate.get(ds) || []).filter(e => !favOnly || state.favs.has(e.s.c));
-    const groups = [["actual", "已公布"], ["est", "預估公布"], ["due", "逾期未公布（法定期限）"]];
     let html = `<h3>${ds ? mdLabel(ds) : ""} 營收公布</h3>`;
-    if (!list.length) html += `<p class="muted">這天沒有營收公布資料</p>`;
-    for (const [type, label] of groups) {
-      const l = list.filter(e => e.type === type).sort((a, b) => (state.favs.has(b.s.c) - state.favs.has(a.s.c)) || a.s.c.localeCompare(b.s.c));
-      if (!l.length) continue;
-      html += `<div class="muted">${label}（${l.length}）</div><ul>` + l.map(e => {
+    if (!list.length) html += `<p class="muted">這天沒有營收公布紀錄</p>`;
+    {
+      const l = [...list].sort((a, b) => (state.favs.has(b.s.c) - state.favs.has(a.s.c)) || a.s.c.localeCompare(b.s.c));
+      if (l.length) html += `<div class="muted">已公布（${l.length}）</div><ul>` + l.map(e => {
         const r = e.s.rev && e.s.rev.ym === e.ym ? e.s.rev : null;
         return `<li data-c="${e.s.c}"><span>${state.favs.has(e.s.c) ? "★" : ""}${e.s.c} ${esc(e.s.n)}</span>
           <span class="muted">${ymLabel(e.ym)}${r?.yoy != null ? ` <span class="${cls(r.yoy)}">YoY ${sign(r.yoy)}${fmt(r.yoy, 1)}%</span>` : ""}</span></li>`;
@@ -237,6 +217,43 @@
     m += n; if (m < 1) { m = 12; y--; } if (m > 12) { m = 1; y++; }
     state.calMonth = `${y}-${String(m).padStart(2, "0")}`;
     renderCalendar();
+  }
+
+  // ---------------------------------------------------------------- 產業排行榜
+  const RANK_METRICS = {
+    cap: { label: "市值", val: mcap, show: v => fmt(v, 0) + " 億" },
+    rev: { label: "月營收", val: s => s.rev?.rev != null ? s.rev.rev / 1e5 : null, show: v => fmt(v, 2) + " 億" },
+    yoy: { label: "月營收年增率", val: s => s.rev?.yoy, show: v => sign(v) + fmt(v, 1) + "%", color: true },
+    cumYoy: { label: "累計營收年增率", val: s => s.rev?.cumYoy, show: v => sign(v) + fmt(v, 1) + "%", color: true },
+    pct: { label: "漲跌幅", val: s => s.pct, show: v => sign(v) + fmt(v, 2) + "%", color: true },
+    v: { label: "成交量", val: s => s.v, show: v => fmt(v, 0) + " 張" },
+  };
+  function renderRank() {
+    const key = $("#rk-metric").value, M = RANK_METRICS[key];
+    const mk = $("#rk-market").value, only = $("#rk-ind").value, asc = $("#rk-order").value === "asc";
+    const groups = new Map();
+    for (const s of state.stocks) {
+      if (mk && s.m !== mk) continue;
+      if (only && s.ind !== only) continue;
+      if (!groups.has(s.ind)) groups.set(s.ind, { all: 0, cap: 0, list: [] });
+      const g = groups.get(s.ind);
+      g.all++; g.cap += mcap(s) || 0;
+      const v = M.val(s);
+      if (v != null && !isNaN(v)) g.list.push([s, v]);
+    }
+    const inds = [...groups.entries()].sort((a, b) => b[1].cap - a[1].cap);
+    $("#rank-grid").innerHTML = inds.map(([ind, g]) => {
+      const top = g.list.sort((a, b) => asc ? a[1] - b[1] : b[1] - a[1]).slice(0, 10);
+      return `<div class="rank-card">
+        <h3>${esc(ind)} <span class="muted">${g.all} 檔</span></h3>
+        <ol>${top.map(([s, v], i) => `<li data-c="${s.c}">
+          <span class="rk-no rk-${i + 1}">${i + 1}</span>
+          <span class="rk-name">${state.favs.has(s.c) ? "★" : ""}${s.c} ${esc(s.n)}</span>
+          <span class="rk-val ${M.color ? cls(v) : ""}">${M.show(v)}</span>
+        </li>`).join("") || `<li class="muted">無資料</li>`}</ol>
+      </div>`;
+    }).join("") || `<p class="muted">沒有符合條件的產業</p>`;
+    $("#rk-count").textContent = `共 ${inds.length} 個產業`;
   }
 
   // ---------------------------------------------------------------- 搜尋建議
@@ -333,13 +350,14 @@
     $("#d-title").textContent = `${s.c} ${s.n}`;
     $("#d-price").innerHTML = s.p == null ? "" : `<span class="${cls(s.chg)}">${fmt(s.p)} ${s.chg == null ? "" : `${sign(s.chg)}${fmt(s.chg)} (${sign(s.pct)}${fmt(s.pct)}%)`}</span>`;
     $("#fav-btn").textContent = state.favs.has(code) ? "★" : "☆";
-    const r = s.rev, n = nextInfo(s);
+    const r = s.rev;
     $("#d-info").innerHTML = `<span>${s.m}・${esc(s.ind)}</span>`
       + (r ? `<span>${ymLabel(r.ym)} 營收 <b>${fmt(r.rev / 1e5)}</b> 億</span>
         <span>月增 <b class="${cls(r.mom)}">${sign(r.mom)}${fmt(r.mom)}%</b></span>
         <span>年增 <b class="${cls(r.yoy)}">${sign(r.yoy)}${fmt(r.yoy)}%</b></span>
         <span>累計年增 <b class="${cls(r.cumYoy)}">${sign(r.cumYoy)}${fmt(r.cumYoy)}%</b></span>` : "")
-      + (n ? `<span>下次營收（${ymLabel(n.ym)}）：<b>${mdLabel(n.date)}</b>${badge(n.type)}</span>` : "");
+      + (r?.date ? `<span>公布日 <b>${mdLabel(r.date)}</b></span>` : "")
+      + (mcap(s) != null ? `<span>市值 <b>${fmt(mcap(s), 0)}</b> 億</span>` : "");
     $("#legend").textContent = "載入中…";
 
     ensureChart();
@@ -390,6 +408,7 @@
     $$(".tab").forEach(b => b.classList.toggle("active", b.dataset.tab === t));
     $("#tab-list").hidden = t !== "list";
     $("#tab-calendar").hidden = t !== "calendar";
+    $("#tab-rank").hidden = t !== "rank";
   }
 
   function bind() {
@@ -416,7 +435,7 @@
     $$("#table th[data-k]").forEach(th => th.onclick = () => {
       const k = th.dataset.k;
       if (state.sortKey === k) state.sortAsc = !state.sortAsc;
-      else { state.sortKey = k; state.sortAsc = ["c", "n", "m", "ind", "next", "revYm"].includes(k); }
+      else { state.sortKey = k; state.sortAsc = ["c", "n", "m", "ind"].includes(k); }
       renderTable();
     });
     $("#table tbody").addEventListener("click", e => {
@@ -432,6 +451,14 @@
     $("#cal-next").onclick = () => shiftMonth(1);
     $("#cal-today").onclick = () => { state.calSel = todayStr(); state.calMonth = state.calSel.slice(0, 7); renderCalendar(); };
     $("#cal-fav").onchange = renderCalendar;
+    ["#rk-metric", "#rk-market", "#rk-ind", "#rk-order"].forEach(id => $(id).onchange = () => {
+      if (id === "#rk-metric") store.set("rkMetric", $(id).value);
+      renderRank();
+    });
+    $("#rank-grid").addEventListener("click", e => {
+      const li = e.target.closest("li[data-c]");
+      if (li) openStock(li.dataset.c);
+    });
 
     $("#close").onclick = closeModal;
     $("#modal").onclick = e => { if (e.target.id === "modal") closeModal(); };
@@ -439,6 +466,7 @@
     $("#fav-btn").onclick = () => current && toggleFav(current.s.c);
     $$(".ranges button").forEach(b => b.onclick = () => { state.range = +b.dataset.range; store.set("range", state.range); applyRange(); });
     renderMaToggles();
+    $("#rk-metric").value = store.get("rkMetric", "cap");
   }
 
   bind();
