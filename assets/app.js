@@ -45,6 +45,11 @@
   const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
   const mcap = s => s.p != null && s.sh ? s.p * s.sh / 1e8 : null; // 市值（億元）
+  // 均線排列：1 多頭（MA20>MA60>MA120）、-1 空頭（MA20<MA60<MA120）、0 糾結；無資料為 undefined
+  const AL_TEXT = { 1: "多頭排列", "-1": "空頭排列", 0: "均線糾結" };
+  const alBadge = s => s.al == null ? '<span class="muted">—</span>'
+    : `<span class="al al-${s.al === 1 ? "bull" : s.al === -1 ? "bear" : "flat"}">${AL_TEXT[s.al]}</span>`;
+  const alMatch = (s, v) => v === "" || s.al === +v;
 
   // ---------------------------------------------------------------- 載入
   async function load() {
@@ -62,6 +67,9 @@
     const inds = [...new Set(st.stocks.map(s => s.ind))].sort((a, b) => a.localeCompare(b, "zh-Hant"));
     $("#f-ind").insertAdjacentHTML("beforeend", inds.map(i => `<option>${esc(i)}</option>`).join(""));
 
+    const alCount = { 1: 0, "-1": 0, 0: 0 };
+    st.stocks.forEach(s => { if (s.al != null) alCount[s.al]++; });
+    $$(".al-select option").forEach(o => { if (o.value !== "") o.textContent = `${AL_TEXT[o.value]}（${alCount[o.value]} 檔）`; });
     $("#rk-ind").insertAdjacentHTML("beforeend", inds.map(i => `<option>${esc(i)}</option>`).join(""));
     renderSoon();
     renderTable();
@@ -119,13 +127,14 @@
       case "yoy": return s.rev?.yoy ?? -Infinity;
       case "revDate": return s.rev?.date ?? "";
       case "cap": return mcap(s) ?? -Infinity;
+      case "al": return s.al ?? -Infinity;
       case "p": case "pct": case "v": return s[k] ?? -Infinity;
       default: return s[k] ?? "";
     }
   }
   function filtered() {
-    const q = $("#search").value, m = $("#f-market").value, ind = $("#f-ind").value, fav = $("#f-fav").checked;
-    const list = state.stocks.filter(s => matches(s, q) && (!m || s.m === m) && (!ind || s.ind === ind) && (!fav || state.favs.has(s.c)));
+    const q = $("#search").value, m = $("#f-market").value, ind = $("#f-ind").value, fav = $("#f-fav").checked, al = $("#f-al").value;
+    const list = state.stocks.filter(s => matches(s, q) && (!m || s.m === m) && (!ind || s.ind === ind) && (!fav || state.favs.has(s.c)) && alMatch(s, al));
     const k = state.sortKey, dir = state.sortAsc ? 1 : -1;
     list.sort((a, b) => {
       const x = sortVal(a, k), y = sortVal(b, k);
@@ -146,13 +155,14 @@
         <td class="r ${cls(s.pct)}">${s.pct == null ? "—" : sign(s.pct) + fmt(s.pct) + "%"}</td>
         <td class="r">${fmt(s.v, 0)}</td>
         <td class="r">${fmt(mcap(s), 0)}</td>
+        <td>${alBadge(s)}</td>
         <td>${r ? ymLabel(r.ym) : "—"}</td>
         <td class="r">${r ? fmt(r.rev / 1e5, 2) : "—"}</td>
         <td class="r ${cls(r?.yoy)}">${r?.yoy == null ? "—" : sign(r.yoy) + fmt(r.yoy) + "%"}</td>
         <td>${r?.date ? mdLabel(r.date) : '<span class="muted">—</span>'}</td>
       </tr>`;
     }).join("");
-    $("#table tbody").innerHTML = rows || `<tr><td colspan="13" class="muted" style="text-align:center;padding:30px">查無符合的股票</td></tr>`;
+    $("#table tbody").innerHTML = rows || `<tr><td colspan="14" class="muted" style="text-align:center;padding:30px">查無符合的股票</td></tr>`;
     $("#count").textContent = `共 ${list.length} 檔`;
     $("#pageinfo").textContent = `${state.page + 1} / ${pages}`;
     $("#prev").disabled = state.page === 0;
@@ -235,6 +245,7 @@
     for (const s of state.stocks) {
       if (mk && s.m !== mk) continue;
       if (only && s.ind !== only) continue;
+      if (!alMatch(s, $("#rk-al").value)) continue;
       if (!groups.has(s.ind)) groups.set(s.ind, { all: 0, cap: 0, list: [] });
       const g = groups.get(s.ind);
       g.all++; g.cap += mcap(s) || 0;
@@ -357,6 +368,7 @@
         <span>年增 <b class="${cls(r.yoy)}">${sign(r.yoy)}${fmt(r.yoy)}%</b></span>
         <span>累計年增 <b class="${cls(r.cumYoy)}">${sign(r.cumYoy)}${fmt(r.cumYoy)}%</b></span>` : "")
       + (r?.date ? `<span>公布日 <b>${mdLabel(r.date)}</b></span>` : "")
+      + (s.ma ? `<span>MA20 <b>${fmt(s.ma[0])}</b>／MA60 <b>${fmt(s.ma[1])}</b>／MA120 <b>${fmt(s.ma[2])}</b> ${alBadge(s)}</span>` : "")
       + (mcap(s) != null ? `<span>市值 <b>${fmt(mcap(s), 0)}</b> 億</span>` : "");
     $("#legend").textContent = "載入中…";
 
@@ -431,7 +443,7 @@
         $("#suggest").hidden = true;
       }
     });
-    ["#f-market", "#f-ind", "#f-fav"].forEach(s => $(s).onchange = () => { state.page = 0; renderTable(); });
+    ["#f-market", "#f-ind", "#f-fav", "#f-al"].forEach(s => $(s).onchange = () => { state.page = 0; renderTable(); });
     $$("#table th[data-k]").forEach(th => th.onclick = () => {
       const k = th.dataset.k;
       if (state.sortKey === k) state.sortAsc = !state.sortAsc;
@@ -451,7 +463,7 @@
     $("#cal-next").onclick = () => shiftMonth(1);
     $("#cal-today").onclick = () => { state.calSel = todayStr(); state.calMonth = state.calSel.slice(0, 7); renderCalendar(); };
     $("#cal-fav").onchange = renderCalendar;
-    ["#rk-metric", "#rk-market", "#rk-ind", "#rk-order"].forEach(id => $(id).onchange = () => {
+    ["#rk-metric", "#rk-market", "#rk-ind", "#rk-order", "#rk-al"].forEach(id => $(id).onchange = () => {
       if (id === "#rk-metric") store.set("rkMetric", $(id).value);
       renderRank();
     });

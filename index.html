@@ -32,6 +32,7 @@
       <div class="filters">
         <select id="f-market"><option value="">全部市場</option><option>上市</option><option>上櫃</option></select>
         <select id="f-ind"><option value="">全部產業</option></select>
+        <select id="f-al" class="al-select"><option value="">全部均線排列</option><option value="1">多頭排列</option><option value="-1">空頭排列</option><option value="0">均線糾結</option></select>
         <label class="chk"><input type="checkbox" id="f-fav"> 只看自選</label>
         <span id="count" class="muted"></span>
       </div>
@@ -48,6 +49,7 @@
               <th data-k="pct" class="r">漲跌幅</th>
               <th data-k="v" class="r">成交量(張)</th>
               <th data-k="cap" class="r">市值(億)</th>
+              <th data-k="al" title="MA20 &gt; MA60 &gt; MA120 為多頭排列；MA20 &lt; MA60 &lt; MA120 為空頭排列">均線排列</th>
               <th data-k="revYm">營收月份</th>
               <th data-k="rev" class="r">月營收(億)</th>
               <th data-k="yoy" class="r">年增率</th>
@@ -80,6 +82,7 @@
         <select id="rk-order"><option value="desc">由高到低</option><option value="asc">由低到高</option></select>
         <select id="rk-market"><option value="">全部市場</option><option>上市</option><option>上櫃</option></select>
         <select id="rk-ind"><option value="">全部產業</option></select>
+        <select id="rk-al" class="al-select"><option value="">全部均線排列</option><option value="1">多頭排列</option><option value="-1">空頭排列</option><option value="0">均線糾結</option></select>
         <span id="rk-count" class="muted"></span>
       </div>
       <div id="rank-grid" class="rank-grid"></div>
