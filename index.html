@@ -22,6 +22,7 @@
 
   <nav class="tabs">
     <button class="tab active" data-tab="list">股票列表</button>
+    <button class="tab" data-tab="rank">產業排行榜</button>
     <button class="tab" data-tab="calendar">營收行事曆</button>
   </nav>
 
@@ -46,10 +47,11 @@
               <th data-k="p" class="r">收盤</th>
               <th data-k="pct" class="r">漲跌幅</th>
               <th data-k="v" class="r">成交量(張)</th>
+              <th data-k="cap" class="r">市值(億)</th>
               <th data-k="revYm">營收月份</th>
               <th data-k="rev" class="r">月營收(億)</th>
               <th data-k="yoy" class="r">年增率</th>
-              <th data-k="next">下次營收公布</th>
+              <th data-k="revDate">營收公布日</th>
             </tr>
           </thead>
           <tbody></tbody>
@@ -62,6 +64,28 @@
       </div>
     </section>
 
+    <!-- 產業排行榜 -->
+    <section id="tab-rank" class="panel" hidden>
+      <div class="filters">
+        <label>排名依據
+          <select id="rk-metric">
+            <option value="cap">市值</option>
+            <option value="rev">月營收</option>
+            <option value="yoy">月營收年增率</option>
+            <option value="cumYoy">累計營收年增率</option>
+            <option value="pct">漲跌幅</option>
+            <option value="v">成交量</option>
+          </select>
+        </label>
+        <select id="rk-order"><option value="desc">由高到低</option><option value="asc">由低到高</option></select>
+        <select id="rk-market"><option value="">全部市場</option><option>上市</option><option>上櫃</option></select>
+        <select id="rk-ind"><option value="">全部產業</option></select>
+        <span id="rk-count" class="muted"></span>
+      </div>
+      <div id="rank-grid" class="rank-grid"></div>
+      <p class="note">每個產業列出前 10 名，產業依總市值由大到小排列；點公司可看技術圖。</p>
+    </section>
+
     <!-- 營收行事曆 -->
     <section id="tab-calendar" class="panel" hidden>
       <div class="cal-head">
@@ -70,7 +94,7 @@
         <button id="cal-next" aria-label="下個月">›</button>
         <button id="cal-today" class="ghost">今天</button>
         <label class="chk"><input type="checkbox" id="cal-fav"> 只看自選</label>
-        <span class="legend"><i class="dot actual"></i>已公布 <i class="dot est"></i>預估 <i class="dot due"></i>逾期未公布</span>
+        <span class="legend"><i class="dot actual"></i>已公布營收的公司數</span>
       </div>
       <div class="cal-layout">
         <div>
@@ -80,9 +104,8 @@
         <aside id="cal-day" class="cal-day"></aside>
       </div>
       <p class="note">
-        依規定上市櫃公司須於每月 10 日前公布上月營收（遇假日順延）。
-        「已公布」日期由每日自動更新時偵測到新營收資料的日期記錄；
-        「預估」日期依該公司過去公布日的中位數推算，尚無紀錄者以法定期限顯示。
+        依規定上市櫃公司須於每月 10 日前公布上月營收。
+        公布日為每日自動更新時偵測到該公司新月份營收的日期（從 2026 年 12 月起開始記錄）。
       </p>
     </section>
   </main>

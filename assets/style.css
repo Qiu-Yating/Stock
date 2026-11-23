@@ -68,6 +68,21 @@ tbody tr:hover { background: var(--bg); }
 .pager button, .ghost, .cal-head button { padding: 5px 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); cursor: pointer; }
 .pager button:disabled { opacity: .4; cursor: default; }
 
+/* 產業排行榜 */
+.rank-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
+.rank-card { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
+.rank-card h3 { margin: 0 0 6px; font-size: 15px; display: flex; justify-content: space-between; align-items: baseline; }
+.rank-card ol { list-style: none; margin: 0; padding: 0; }
+.rank-card li { display: flex; align-items: center; gap: 8px; padding: 5px 2px; border-bottom: 1px dashed var(--line); cursor: pointer; font-size: 13px; }
+.rank-card li:last-child { border-bottom: none; }
+.rank-card li:hover { background: var(--bg); }
+.rk-no { width: 20px; height: 20px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; background: var(--bg); color: var(--muted); flex: none; }
+.rk-1 { background: #f5c542; color: #4a3500; }
+.rk-2 { background: #c9ced6; color: #2b3038; }
+.rk-3 { background: #d99a5b; color: #3d2208; }
+.rk-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rk-val { font-variant-numeric: tabular-nums; white-space: nowrap; }
+
 /* 行事曆 */
 .cal-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
 .cal-head h2 { margin: 0; font-size: 18px; min-width: 120px; text-align: center; }

@@ -7,7 +7,7 @@
   - 證交所 MI_INDEX（每日收盤行情）、櫃買中心 dailyQuotes（上櫃股票行情）
 
 輸出：
-  data/stocks.json          個股清單＋最新行情＋最新營收＋下次營收公布日（實際或預估）
+  data/stocks.json          個股清單＋最新行情＋最新營收（含實際公布日）＋發行股數
   data/revenue_dates.json   每家公司各月份營收的「實際公布日」紀錄（每天執行時偵測到新資料即記錄當天日期）
   data/prices/{代號}.json    日K資料 [[yyyymmdd, 開, 高, 低, 收, 成交張數], ...]
   data/prices/_meta.json     已抓取的交易日清單
@@ -23,7 +23,6 @@ import argparse
 import datetime as dt
 import json
 import os
-import statistics
 import sys
 import time
 import urllib.request
@@ -99,11 +98,12 @@ def fetch_companies():
     companies = {}
     for r in listed:
         c = r["公司代號"].strip()
-        companies[c] = {"c": c, "n": r["公司簡稱"].strip(), "m": "上市", "_ic": r["產業別"].strip()}
+        companies[c] = {"c": c, "n": r["公司簡稱"].strip(), "m": "上市", "_ic": r["產業別"].strip(),
+                        "sh": num(r.get("已發行普通股數或TDR原股發行股數"))}
     for r in otc:
         c = r["SecuritiesCompanyCode"].strip()
         companies[c] = {"c": c, "n": r["CompanyAbbreviation"].strip(), "m": "上櫃",
-                        "_ic": r["SecuritiesIndustryCode"].strip()}
+                        "_ic": r["SecuritiesIndustryCode"].strip(), "sh": num(r.get("IssueShares"))}
 
     revenue = {}
     code_to_ind = {}
@@ -137,30 +137,6 @@ def deadline_for(ym: str) -> dt.date:
     while d.weekday() >= 5:
         d += dt.timedelta(days=1)
     return d
-
-
-def next_ym(ym: str) -> str:
-    y, m = map(int, ym.split("-"))
-    y, m = (y + 1, 1) if m == 12 else (y, m + 1)
-    return f"{y}-{m:02d}"
-
-
-def estimate_date(ym: str, history: dict) -> tuple[str, bool]:
-    """依過去實際公布日（每月第幾天）的中位數，推估 ym 月營收的公布日。"""
-    dl = deadline_for(ym)
-    days = [int(v[-2:]) for v in history.values() if v]
-    if not days:
-        return dl.isoformat(), False
-    day = int(round(statistics.median(days)))
-    d = dl.replace(day=min(max(day, 1), 28))
-    # 遇週末往前挪到週五（但不跨月）
-    while d.weekday() >= 5 and d.day > 1:
-        d -= dt.timedelta(days=1)
-    while d.weekday() >= 5:
-        d += dt.timedelta(days=1)
-    if d > dl:
-        d = dl
-    return d.isoformat(), True
 
 
 def update_revenue_dates(revenue: dict) -> dict:
@@ -314,7 +290,6 @@ def update_prices(companies: dict, backfill_days: int):
 
 # ---------------------------------------------------------------- 主程式
 def build_stocks(companies, revenue, rev_dates):
-    today = now_tw().date()
     out = []
     for c in sorted(companies):
         co = dict(companies[c])
@@ -328,18 +303,11 @@ def build_stocks(companies, revenue, rev_dates):
                 co["chg"] = round(last[4] - prev, 2)
                 co["pct"] = round((last[4] - prev) / prev * 100, 2)
         r = revenue.get(c)
-        hist = rev_dates.get(c, {})
         if r:
             co["rev"] = r
-            co["rev"]["date"] = hist.get(r["ym"])
-            nym = next_ym(r["ym"])
-        else:
-            # 沒有營收資料：以上個月為預期公布月份
-            ld = today.replace(day=1) - dt.timedelta(days=1)
-            nym = f"{ld.year}-{ld.month:02d}"
-        est, by_hist = estimate_date(nym, hist)
-        dl = deadline_for(nym)
-        co["next"] = {"ym": nym, "date": est, "deadline": dl.isoformat(), "hist": by_hist, "overdue": today > dl}
+            co["rev"]["date"] = rev_dates.get(c, {}).get(r["ym"])
+        if not co.get("sh"):
+            co.pop("sh", None)
         out.append(co)
     return out
 
