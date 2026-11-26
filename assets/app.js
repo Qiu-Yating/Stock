@@ -274,10 +274,12 @@
   const tickOf = p => p < 10 ? 0.01 : p < 50 ? 0.05 : p < 100 ? 0.1 : p < 500 ? 0.5 : p < 1000 ? 1 : 5;
   const roundTick = p => { const t = tickOf(p); return +(Math.round(p / t) * t).toFixed(2); };
   const limitUpOf = prev => { const lim = prev * 1.1, t = tickOf(lim); return +(Math.floor(lim / t + 1e-9) * t).toFixed(2); };
-  const LV = { minBars: 20, nearPct: 10, midPct: 20 };
+  // 參數比照 2tonstock：近端 ±10%、中期 10～20%；合併容差 = clamp(0.6 × ATR%, 1%, 3%)，
+  // 接手區用容差的一半合併、突破觀察用完整容差合併；近端擴展只取一道
+  const LV = { minBars: 20, atrN: 20, nearPct: 10, midPct: 20, tolK: 0.6, tolMin: 1, tolMax: 3, zzMin: 0.04, zzAtrK: 2.5 };
 
   // 平均真實波幅（ATR）
-  function atr(rows, n = 20) {
+  function atr(rows, n = LV.atrN) {
     const k = rows.length; if (k < 2) return 0;
     let sum = 0, cnt = 0;
     for (let i = Math.max(1, k - n); i < k; i++) {
@@ -309,45 +311,76 @@
     return piv; // 只回傳已確認的轉折（最後一段尚未反轉的極值不算）
   }
 
-  // 落在同一波動容差內的相鄰轉折合併成一個價格帶
-  function clusterBands(pivots, tolPct) {
-    const ps = [...pivots].sort((a, b) => a.p - b.p);
+  // 由近到遠合併轉折：以每個價格帶「最靠近現價的那一端」為錨點，距錨點在容差內才併入（不連鎖擴張）
+  function clusterBands(pivots, tolPct, side) {
+    const ps = [...pivots].sort((a, b) => side === "down" ? b.p - a.p : a.p - b.p);
     const bands = [];
     for (const v of ps) {
       const b = bands[bands.length - 1];
-      if (b && (v.p - b.lo) / b.lo <= tolPct) { b.hi = v.p; b.n++; b.last = Math.max(b.last, v.i); }
-      else bands.push({ lo: v.p, hi: v.p, n: 1, last: v.i });
+      const anchor = b && (side === "down" ? b.hi : b.lo);
+      if (b && Math.abs(anchor - v.p) / anchor * 100 <= tolPct) {
+        if (side === "down") b.lo = v.p; else b.hi = v.p;
+        b.n++; b.last = Math.max(b.last, v.i);
+      } else bands.push({ lo: v.p, hi: v.p, n: 1, last: v.i });
     }
-    return bands.map(b => ({ ...b, lo: roundTick(b.lo), hi: roundTick(b.hi) }));
+    return bands;
+  }
+
+  // 依台股升降單位取整，且保證接手區在現價之下、壓力在現價之上
+  function tickDir(p, side, close) {
+    let v = roundTick(p);
+    const t = tickOf(close);
+    if (side === "down" && v >= close - 1e-9) v = +((Math.ceil(close / t - 1e-6) - 1) * t).toFixed(2);
+    if (side === "up" && v <= close + 1e-9) v = +((Math.floor(close / t + 1e-6) + 1) * t).toFixed(2);
+    return v;
   }
 
   function computeLevels(rows) {
     if (rows.length < LV.minBars) return { status: "資料不足", note: `收盤 K 線不足 ${LV.minBars} 根，不做結構選點。` };
     const close = rows[rows.length - 1][4];
     const a = atr(rows);
-    const th = Math.max(0.04, 2.5 * a / close);          // 有效轉折門檻：至少 4% 或 2.5 倍 ATR
-    const tol = Math.max(0.01, 0.5 * a / close);         // 合併容差：1% 或 0.5 倍 ATR
-    const bands = clusterBands(zigzag(rows, th), tol);
-    const dist = b => (b.mid - close) / close * 100;
-    bands.forEach(b => { b.mid = (b.lo + b.hi) / 2; b.d = dist(b); });
-    const below = bands.filter(b => b.hi < close).sort((x, y) => y.hi - x.hi);   // 由近到遠
-    const above = bands.filter(b => b.lo > close).sort((x, y) => x.lo - y.lo);
+    const atrPct = a / close * 100;
+    const th = Math.max(LV.zzMin, LV.zzAtrK * a / close);                         // 有效轉折門檻：至少 4% 或 2.5 倍 ATR
+    const tol = Math.max(LV.tolMin, Math.min(LV.tolMax, LV.tolK * atrPct));         // 波動容差（%）：0.6 倍 ATR%，夾在 1%～3%
+    const piv = zigzag(rows, th);
+    const pct = p => (p - close) / close * 100;
 
-    // 常見接手區：現價下方 0～20% 內最近的兩個獨立價格帶
-    const sup = below.filter(b => -b.d <= LV.midPct).slice(0, 2)
-      .map((b, k) => ({ ...b, name: k ? "第二常見接手區" : "第一常見接手區", zone: -b.d <= LV.nearPct ? "近端" : "中期" }));
-    const longSup = below.find(b => -b.d > LV.midPct);
+    // 常見接手區：現價下方的轉折，以容差的一半合併；距離以價格帶上緣（最接近現價的一端）計算
+    const below = clusterBands(piv.filter(v => v.p < close * 0.999), tol / 2, "down").map(b => {
+      const hi = tickDir(b.hi, "down", close), lo = tickDir(b.lo, "down", close);
+      return { ...b, hi, lo: Math.min(lo, hi), d: pct(hi) };
+    });
+    const supIn = below.filter(b => -b.d <= LV.midPct);
+    const sup = supIn.slice(0, 2).map((b, k) => {
+      const near = -b.d <= LV.nearPct;
+      return { ...b, name: k ? "第二常見接手區" : "第一常見接手區", zone: near ? "近端" : "中期" };
+    });
+    const longSup = below.find(b => -b.d > LV.midPct) || null;
 
-    // 突破觀察：現價上方最近的結構；近端擴展：其上方的下一、二道獨立結構
-    let brk = null, ext = [], lu = null;
-    if (above.length) {
-      brk = { ...above[0], name: "突破觀察", zone: above[0].d <= LV.nearPct ? "近端" : "中期" };
-      ext = above.slice(1, 3).map((b, k) => ({ ...b, name: k ? "第二近端擴展" : "第一近端擴展",
-        zone: b.d <= LV.nearPct ? "近端" : "中期擴展" }));
-    } else {
-      lu = limitUpOf(close); // 創新高、上方沒有歷史結構
+    // 上方結構：以容差的一半合併成獨立價位；距離以價格帶下緣計算
+    const above = clusterBands(piv.filter(v => v.p > close * 1.001), tol / 2, "up").map(b => {
+      const lo = tickDir(b.lo, "up", close), hi = tickDir(b.hi, "up", close);
+      return { ...b, lo, hi: Math.max(lo, hi), d: pct(lo) };
+    });
+    const gap = (x, y) => (y - x) / x * 100;
+
+    // 突破觀察：現價上方 10% 內最近的結構；其上同一波動容差內的結構併成同一壓力帶
+    let brk = null, ext = [], used = 0, lu = null;
+    if (above.length && above[0].d <= LV.nearPct) {
+      const h = above[0];
+      let top = h; used = 1;
+      while (used < above.length && gap(h.lo, above[used].lo) <= tol) top = above[used++];
+      brk = { ...h, hi: top.hi, n: above.slice(0, used).reduce((s, b) => s + b.n, 0), name: "突破觀察", zone: "近端" };
+      // 近端擴展：突破觀察帶之上、間距大於容差的下一道獨立結構；超過 +10% 改標中期擴展，超過 +20% 留白
+      const i = above.findIndex((b, k) => k >= used && gap(brk.hi, b.lo) > tol);
+      if (i >= 0 && above[i].d <= LV.midPct) {
+        ext = [{ ...above[i], name: above[i].d <= LV.nearPct ? "近端擴展" : "中期擴展", zone: above[i].d <= LV.nearPct ? "近端" : "中期" }];
+        used = i + 1;
+      }
     }
-    return { status: "ok", close, th, tol, sup, longSup, brk, ext, lu };
+    const longRes = above.slice(used).find(b => b.d > LV.nearPct) || null;
+    if (!above.length) lu = limitUpOf(close); // 創新高、上方沒有歷史結構
+    return { status: "ok", close, th, tol, atrPct, sup, longSup, brk, ext, longRes, lu };
   }
 
   const LV_GROUPS = [
@@ -372,14 +405,21 @@
     const box = $("#levels");
     if (L.status !== "ok") { box.innerHTML = `<div class="muted">價位結構：${L.status}。${L.note || ""}</div>`; drawLevelLines(); return; }
     const empty = msg => `<li class="muted">${msg}</li>`;
+    const luItem = () => `<li><span class="lv-dot" style="background:${LV_GROUPS[1].color}"></span><span class="lv-name">明日漲停參考價<span class="lv-zone">非結構價位</span></span>
+           <span class="lv-price">${fmt(L.lu)}</span><span class="lv-dist up">+${fmt((L.lu - L.close) / L.close * 100, 1)}%</span><span class="muted lv-n">創新高，上方無歷史結構</span></li>`;
+    const ref = (b, why) => `<li class="muted lv-long">${why}：${bandText(b)}（${sign(b.d)}${fmt(b.d, 1)}%）</li>`;
     const body = {
-      support: (L.sup.length ? L.sup.map(b => lvItem(b, LV_GROUPS[0].color)).join("") : empty("尚未形成（現價下方 20% 內沒有有效轉折結構）"))
-        + (L.longSup ? `<li class="muted lv-long">長期結構參考：${bandText(L.longSup)}（${fmt(L.longSup.d, 1)}%，距現價超過 20%，不列入第一／第二常見接手區）</li>` : ""),
+      support: (L.sup.length ? L.sup.map(b => lvItem(b, LV_GROUPS[0].color)).join("")
+          + (L.sup.length === 1 ? empty("目前近端沒有第二個獨立有效接手區") : "")
+          : empty("近期明確接手區尚未形成（現價下方 20% 內沒有有效轉折結構）"))
+        + (L.longSup ? ref(L.longSup, "長期結構參考（距現價超過 20%，不列入第一／第二常見接手區）") : ""),
       breakout: L.brk ? lvItem(L.brk, LV_GROUPS[1].color)
-        : `<li><span class="lv-dot" style="background:${LV_GROUPS[1].color}"></span><span class="lv-name">明日漲停參考價<span class="lv-zone">非結構價位</span></span>
-           <span class="lv-price">${fmt(L.lu)}</span><span class="lv-dist up">+${fmt((L.lu - L.close) / L.close * 100, 1)}%</span><span class="muted lv-n">創新高，上方無歷史結構</span></li>`,
-      pressure: L.ext.length ? L.ext.map(b => lvItem(b, LV_GROUPS[2].color)).join("")
-        : empty(L.brk ? "尚未形成（突破觀察價上方沒有下一道獨立結構）" : "上方無歷史結構，以漲停參考價為準"),
+        : L.lu != null ? luItem()
+        : empty("目前 +10% 內無明確近端壓力；較遠的價位列於中長期結構參考"),
+      pressure: (L.ext.length ? L.ext.map(b => lvItem(b, LV_GROUPS[2].color)).join("")
+          : empty(L.lu != null ? "上方無歷史結構，以漲停參考價為準"
+            : L.brk ? "目前 +20% 內沒有突破觀察帶之上的下一道獨立結構" : "突破觀察未形成，近端擴展留白"))
+        + (L.longRes ? ref(L.longRes, "中長期結構參考（超出近端擴展範圍）") : ""),
     };
     box.innerHTML = `<div class="lv-pills">${LV_GROUPS.map(g =>
       `<button class="lv-pill ${lvState.on[g.key] ? "on" : ""}" data-k="${g.key}" style="--c:${g.color}">${g.icon} ${g.pill}</button>`).join("")}
@@ -402,8 +442,8 @@
       price, color, lineWidth: 1, lineStyle: style, axisLabelVisible: true, title }));
     const band = (b, color, title) => { add(b.hi, color, title); if (b.lo !== b.hi) add(b.lo, color, ""); };
     if (lvState.on.support) L.sup.forEach((b, k) => band(b, LV_GROUPS[0].color, `接手${k + 1}`));
-    if (lvState.on.breakout) L.brk ? band(L.brk, LV_GROUPS[1].color, "突破") : add(L.lu, LV_GROUPS[1].color, "漲停參考", 1);
-    if (lvState.on.pressure) L.ext.forEach((b, k) => band(b, LV_GROUPS[2].color, `擴展${k + 1}`));
+    if (lvState.on.breakout) { if (L.brk) band(L.brk, LV_GROUPS[1].color, "突破"); else if (L.lu != null) add(L.lu, LV_GROUPS[1].color, "漲停參考", 1); }
+    if (lvState.on.pressure) L.ext.forEach(b => band(b, LV_GROUPS[2].color, "擴展"));
   }
 
   // ---------------------------------------------------------------- 條件選股
