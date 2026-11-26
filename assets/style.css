@@ -42,8 +42,8 @@ button, select, input { font: inherit; color: inherit; }
 .soon .chip { display: inline-block; margin: 2px 4px 2px 0; padding: 0 8px; border-radius: 999px; background: var(--bg); border: 1px solid var(--line); cursor: pointer; font-size: 13px; }
 .soon .chip:hover { border-color: var(--accent); }
 
-.tabs { display: flex; gap: 4px; padding: 14px 20px 0; }
-.tab { padding: 8px 18px; border: 1px solid var(--line); border-bottom: none; border-radius: 8px 8px 0 0; background: transparent; cursor: pointer; }
+.tabs { display: flex; gap: 4px; padding: 14px 20px 0; overflow-x: auto; }
+.tab { white-space: nowrap; padding: 8px 18px; border: 1px solid var(--line); border-bottom: none; border-radius: 8px 8px 0 0; background: transparent; cursor: pointer; }
 .tab.active { background: var(--card); font-weight: 600; }
 main { padding: 0 20px 30px; }
 .panel { background: var(--card); border: 1px solid var(--line); border-radius: 0 10px 10px 10px; padding: 14px; }
@@ -73,6 +73,26 @@ tbody tr:hover { background: var(--bg); }
 .al-bull { background: rgba(224, 52, 47, .12); color: var(--up); }
 .al-bear { background: rgba(26, 152, 80, .12); color: var(--down); }
 .al-flat { background: var(--bg); color: var(--muted); border: 1px solid var(--line); }
+
+/* 條件選股 */
+.screen-intro { margin: 0 0 12px; line-height: 1.8; }
+.tag { display: inline-block; font-size: 11px; padding: 0 6px; border-radius: 4px; font-weight: 600; }
+.tag.must { background: var(--up); color: #fff; }
+.tag.plus { background: var(--actual); color: #fff; }
+.tag.off { background: var(--bg); color: var(--muted); border: 1px solid var(--line); }
+.screen-conds { display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 8px; margin-bottom: 12px; }
+.sc-cond { display: flex; justify-content: space-between; align-items: center; gap: 10px; border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; }
+.sc-label { font-weight: 600; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; flex: none; }
+.seg button { border: none; background: var(--bg); padding: 4px 10px; cursor: pointer; font-size: 13px; color: var(--muted); }
+.seg button + button { border-left: 1px solid var(--line); }
+.seg button.on.must { background: var(--up); color: #fff; }
+.seg button.on.plus { background: var(--actual); color: #fff; }
+.seg button.on.off { background: var(--line); color: var(--fg); }
+#sc-table th.c, #sc-table td.c { text-align: center; }
+#sc-table th.c { font-size: 12px; white-space: normal; min-width: 76px; line-height: 1.4; }
+.ok { color: var(--up); font-weight: 700; }
+.no { color: var(--muted); }
 
 /* 產業排行榜 */
 .rank-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }

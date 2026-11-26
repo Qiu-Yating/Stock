@@ -22,6 +22,7 @@
 
   <nav class="tabs">
     <button class="tab active" data-tab="list">股票列表</button>
+    <button class="tab" data-tab="screen">條件選股</button>
     <button class="tab" data-tab="rank">產業排行榜</button>
     <button class="tab" data-tab="calendar">營收行事曆</button>
   </nav>
@@ -64,6 +65,37 @@
         <span id="pageinfo"></span>
         <button id="next">下一頁</button>
       </div>
+    </section>
+
+    <!-- 條件選股 -->
+    <section id="tab-screen" class="panel" hidden>
+      <p class="screen-intro">
+        每個條件可設為<b class="tag must">必要</b>（全部符合才列出）、<b class="tag plus">加分</b>（不會排除股票，只決定排名先後）或<b class="tag off">不用</b>。
+        結果依「符合的加分條件數」排序，同分再依漲跌幅排序。範圍為上市、上櫃普通股（不含 ETF、興櫃）。
+      </p>
+      <div id="screen-conds" class="screen-conds"></div>
+      <div class="filters">
+        <button id="sc-reset" class="ghost">恢復預設</button>
+        <button id="sc-allplus" class="ghost">全部設為加分</button>
+        <select id="sc-market"><option value="">全部市場</option><option>上市</option><option>上櫃</option></select>
+        <span id="sc-count" class="muted"></span>
+      </div>
+      <div class="table-wrap">
+        <table id="sc-table">
+          <thead><tr id="sc-head"></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <div class="pager">
+        <button id="sc-prev">上一頁</button>
+        <span id="sc-pageinfo"></span>
+        <button id="sc-next">下一頁</button>
+      </div>
+      <p class="note">
+        ✓ 符合　✗ 不符合　? 無法判定（資料不足時不算符合，也不會當成不符合而排除，除非該條件設為必要）。<br>
+        「月營收連續三個月創高」需要至少 4 個月的營收紀錄；官方開放資料只提供最新一期與上月營收，本站從 2026 年 11 月起逐月累積，資料足夠前會顯示「?」。<br>
+        「漲停」以前一日收盤價 ×1.1 並依升降單位計算；EPS 為最新已公布季度的累計基本每股盈餘。
+      </p>
     </section>
 
     <!-- 產業排行榜 -->
