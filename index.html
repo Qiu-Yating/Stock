@@ -157,6 +157,7 @@
         <button id="close" class="close" aria-label="關閉">×</button>
       </div>
       <div id="d-info" class="d-info"></div>
+      <div id="levels" class="levels"></div>
       <div class="chart-ctrl">
         <div class="ranges">
           <button data-range="66">3個月</button>
@@ -168,7 +169,9 @@
       </div>
       <div id="legend" class="chart-legend"></div>
       <div id="chart" class="chart"></div>
-      <p class="note">股價為未還原權息之原始價格；均線以收盤價計算。</p>
+      <p class="note">股價為未還原權息之原始價格；均線以收盤價計算。<br>
+        價位結構為歷史價格轉折的觀察位置，不是目標價、也不是買賣建議。轉折以 ZigZag 判定（反向波動至少 4% 或 2.5 倍 ATR），
+        容差內（1% 或 0.5 倍 ATR）的相鄰轉折合併為價格帶，價位依台股升降單位取整。</p>
     </div>
   </div>
 

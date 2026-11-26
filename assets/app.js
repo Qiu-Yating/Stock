@@ -269,6 +269,143 @@
     $("#rk-count").textContent = `共 ${inds.length} 個產業`;
   }
 
+  // ---------------------------------------------------------------- 價位結構（常見接手區／突破觀察／近端擴展）
+  // 台股升降單位
+  const tickOf = p => p < 10 ? 0.01 : p < 50 ? 0.05 : p < 100 ? 0.1 : p < 500 ? 0.5 : p < 1000 ? 1 : 5;
+  const roundTick = p => { const t = tickOf(p); return +(Math.round(p / t) * t).toFixed(2); };
+  const limitUpOf = prev => { const lim = prev * 1.1, t = tickOf(lim); return +(Math.floor(lim / t + 1e-9) * t).toFixed(2); };
+  const LV = { minBars: 20, nearPct: 10, midPct: 20 };
+
+  // 平均真實波幅（ATR）
+  function atr(rows, n = 20) {
+    const k = rows.length; if (k < 2) return 0;
+    let sum = 0, cnt = 0;
+    for (let i = Math.max(1, k - n); i < k; i++) {
+      const [, , h, l] = rows[i], pc = rows[i - 1][4];
+      sum += Math.max(h - l, Math.abs(h - pc), Math.abs(l - pc)); cnt++;
+    }
+    return sum / cnt;
+  }
+
+  // ZigZag：價格自前一個高（低）點反向超過門檻才算一次「有效轉折」
+  function zigzag(rows, th) {
+    const piv = [];
+    let dir = 0, ext = null, extI = 0, hi = rows[0][2], hiI = 0, lo = rows[0][3], loI = 0;
+    for (let i = 1; i < rows.length; i++) {
+      const h = rows[i][2], l = rows[i][3];
+      if (dir === 0) {
+        if (h > hi) { hi = h; hiI = i; }
+        if (l < lo) { lo = l; loI = i; }
+        if (hi >= lo * (1 + th) && hiI > loI) { piv.push({ i: loI, p: lo, type: "L" }); dir = 1; ext = hi; extI = hiI; }
+        else if (hi >= lo * (1 + th) && loI > hiI) { piv.push({ i: hiI, p: hi, type: "H" }); dir = -1; ext = lo; extI = loI; }
+      } else if (dir === 1) {
+        if (h > ext) { ext = h; extI = i; }
+        else if (l <= ext * (1 - th)) { piv.push({ i: extI, p: ext, type: "H" }); dir = -1; ext = l; extI = i; }
+      } else {
+        if (l < ext) { ext = l; extI = i; }
+        else if (h >= ext * (1 + th)) { piv.push({ i: extI, p: ext, type: "L" }); dir = 1; ext = h; extI = i; }
+      }
+    }
+    return piv; // 只回傳已確認的轉折（最後一段尚未反轉的極值不算）
+  }
+
+  // 落在同一波動容差內的相鄰轉折合併成一個價格帶
+  function clusterBands(pivots, tolPct) {
+    const ps = [...pivots].sort((a, b) => a.p - b.p);
+    const bands = [];
+    for (const v of ps) {
+      const b = bands[bands.length - 1];
+      if (b && (v.p - b.lo) / b.lo <= tolPct) { b.hi = v.p; b.n++; b.last = Math.max(b.last, v.i); }
+      else bands.push({ lo: v.p, hi: v.p, n: 1, last: v.i });
+    }
+    return bands.map(b => ({ ...b, lo: roundTick(b.lo), hi: roundTick(b.hi) }));
+  }
+
+  function computeLevels(rows) {
+    if (rows.length < LV.minBars) return { status: "資料不足", note: `收盤 K 線不足 ${LV.minBars} 根，不做結構選點。` };
+    const close = rows[rows.length - 1][4];
+    const a = atr(rows);
+    const th = Math.max(0.04, 2.5 * a / close);          // 有效轉折門檻：至少 4% 或 2.5 倍 ATR
+    const tol = Math.max(0.01, 0.5 * a / close);         // 合併容差：1% 或 0.5 倍 ATR
+    const bands = clusterBands(zigzag(rows, th), tol);
+    const dist = b => (b.mid - close) / close * 100;
+    bands.forEach(b => { b.mid = (b.lo + b.hi) / 2; b.d = dist(b); });
+    const below = bands.filter(b => b.hi < close).sort((x, y) => y.hi - x.hi);   // 由近到遠
+    const above = bands.filter(b => b.lo > close).sort((x, y) => x.lo - y.lo);
+
+    // 常見接手區：現價下方 0～20% 內最近的兩個獨立價格帶
+    const sup = below.filter(b => -b.d <= LV.midPct).slice(0, 2)
+      .map((b, k) => ({ ...b, name: k ? "第二常見接手區" : "第一常見接手區", zone: -b.d <= LV.nearPct ? "近端" : "中期" }));
+    const longSup = below.find(b => -b.d > LV.midPct);
+
+    // 突破觀察：現價上方最近的結構；近端擴展：其上方的下一、二道獨立結構
+    let brk = null, ext = [], lu = null;
+    if (above.length) {
+      brk = { ...above[0], name: "突破觀察", zone: above[0].d <= LV.nearPct ? "近端" : "中期" };
+      ext = above.slice(1, 3).map((b, k) => ({ ...b, name: k ? "第二近端擴展" : "第一近端擴展",
+        zone: b.d <= LV.nearPct ? "近端" : "中期擴展" }));
+    } else {
+      lu = limitUpOf(close); // 創新高、上方沒有歷史結構
+    }
+    return { status: "ok", close, th, tol, sup, longSup, brk, ext, lu };
+  }
+
+  const LV_GROUPS = [
+    { key: "support", pill: "常見接手區", icon: "🛡", color: "#14b8a6" },
+    { key: "breakout", pill: "突破觀察", icon: "⚡", color: "#0ea5e9" },
+    { key: "pressure", pill: "近端擴展", icon: "🔥", color: "#f97316" },
+  ];
+  const lvState = { on: store.get("lvOn", { support: true, breakout: true, pressure: true }), lines: [] };
+
+  function bandText(b) { return b.lo === b.hi ? fmt(b.lo) : `${fmt(b.lo)}～${fmt(b.hi)}`; }
+  function lvItem(b, color) {
+    return `<li><span class="lv-dot" style="background:${color}"></span>
+      <span class="lv-name">${b.name}<span class="lv-zone">${b.zone}</span></span>
+      <span class="lv-price">${bandText(b)}</span>
+      <span class="lv-dist ${cls(b.d)}">${sign(b.d)}${fmt(b.d, 1)}%</span>
+      <span class="muted lv-n">轉折 ${b.n} 次</span></li>`;
+  }
+
+  function renderLevels() {
+    if (!current) return;
+    const L = current.levels;
+    const box = $("#levels");
+    if (L.status !== "ok") { box.innerHTML = `<div class="muted">價位結構：${L.status}。${L.note || ""}</div>`; drawLevelLines(); return; }
+    const empty = msg => `<li class="muted">${msg}</li>`;
+    const body = {
+      support: (L.sup.length ? L.sup.map(b => lvItem(b, LV_GROUPS[0].color)).join("") : empty("尚未形成（現價下方 20% 內沒有有效轉折結構）"))
+        + (L.longSup ? `<li class="muted lv-long">長期結構參考：${bandText(L.longSup)}（${fmt(L.longSup.d, 1)}%，距現價超過 20%，不列入第一／第二常見接手區）</li>` : ""),
+      breakout: L.brk ? lvItem(L.brk, LV_GROUPS[1].color)
+        : `<li><span class="lv-dot" style="background:${LV_GROUPS[1].color}"></span><span class="lv-name">明日漲停參考價<span class="lv-zone">非結構價位</span></span>
+           <span class="lv-price">${fmt(L.lu)}</span><span class="lv-dist up">+${fmt((L.lu - L.close) / L.close * 100, 1)}%</span><span class="muted lv-n">創新高，上方無歷史結構</span></li>`,
+      pressure: L.ext.length ? L.ext.map(b => lvItem(b, LV_GROUPS[2].color)).join("")
+        : empty(L.brk ? "尚未形成（突破觀察價上方沒有下一道獨立結構）" : "上方無歷史結構，以漲停參考價為準"),
+    };
+    box.innerHTML = `<div class="lv-pills">${LV_GROUPS.map(g =>
+      `<button class="lv-pill ${lvState.on[g.key] ? "on" : ""}" data-k="${g.key}" style="--c:${g.color}">${g.icon} ${g.pill}</button>`).join("")}
+      <span class="muted lv-hint">點按切換是否畫在 K 線圖上</span></div>
+      <div class="lv-cols">${LV_GROUPS.map(g => `<div class="lv-col"><div class="lv-title" style="color:${g.color}">${g.icon} ${g.pill}</div><ul>${body[g.key]}</ul></div>`).join("")}</div>`;
+    $$(".lv-pill", box).forEach(b => b.onclick = () => {
+      lvState.on[b.dataset.k] = !lvState.on[b.dataset.k];
+      store.set("lvOn", lvState.on);
+      renderLevels();
+    });
+    drawLevelLines();
+  }
+
+  function drawLevelLines() {
+    lvState.lines.forEach(l => candle.removePriceLine(l));
+    lvState.lines = [];
+    const L = current?.levels;
+    if (!L || L.status !== "ok") return;
+    const add = (price, color, title, style = 2) => lvState.lines.push(candle.createPriceLine({
+      price, color, lineWidth: 1, lineStyle: style, axisLabelVisible: true, title }));
+    const band = (b, color, title) => { add(b.hi, color, title); if (b.lo !== b.hi) add(b.lo, color, ""); };
+    if (lvState.on.support) L.sup.forEach((b, k) => band(b, LV_GROUPS[0].color, `接手${k + 1}`));
+    if (lvState.on.breakout) L.brk ? band(L.brk, LV_GROUPS[1].color, "突破") : add(L.lu, LV_GROUPS[1].color, "漲停參考", 1);
+    if (lvState.on.pressure) L.ext.forEach((b, k) => band(b, LV_GROUPS[2].color, `擴展${k + 1}`));
+  }
+
   // ---------------------------------------------------------------- 條件選股
   // test 回傳 true / false / null（null = 無法判定）
   const SC_CONDS = [
@@ -456,6 +593,8 @@
     for (const m of MA_DEFS) maSeries[m.n].setData(maData[m.n]);
     if (!rows.length) $("#legend").textContent = "目前沒有這檔股票的股價資料";
     else updateLegend(null);
+    current.levels = rows.length ? computeLevels(rows) : { status: "資料不足" };
+    renderLevels();
     applyRange();
   }
   function closeModal() {
