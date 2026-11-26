@@ -74,6 +74,8 @@
     renderSoon();
     renderTable();
     renderRank();
+    renderScreenConds();
+    renderScreen();
     const t = todayStr();
     state.calMonth = t.slice(0, 7);
     state.calSel = t;
@@ -267,6 +269,72 @@
     $("#rk-count").textContent = `共 ${inds.length} 個產業`;
   }
 
+  // ---------------------------------------------------------------- 條件選股
+  // test 回傳 true / false / null（null = 無法判定）
+  const SC_CONDS = [
+    { id: "h3", label: "月營收連續三個月創高", desc: "最近三個月營收每月都創收錄期間新高", def: "plus",
+      test: s => s.rev?.h3 == null ? null : s.rev.h3 === 1 },
+    { id: "mom", label: "單月營收月增", desc: "最新月營收高於上個月", def: "plus",
+      test: s => s.rev?.mom == null ? null : s.rev.mom > 0 },
+    { id: "h20", label: "收盤創近 20 日新高", desc: "最新收盤價高於前 19 個交易日收盤", def: "plus",
+      test: s => s.f ? s.f.h20 === 1 : null },
+    { id: "a3", label: "站上 5、10、20 日均線", desc: "收盤價同時高於三條均線", def: "must",
+      test: s => s.f ? s.f.a3 === 1 : null },
+    { id: "lu", label: "最近一日收盤漲停", desc: "收盤價達漲停價", def: "must",
+      test: s => s.f ? s.f.lu === 1 : null },
+    { id: "eps", label: "EPS 為正", desc: "最新已公布累計 EPS > 0；沒有 EPS 為無法判定", def: "plus",
+      test: s => s.eps == null ? null : s.eps.v > 0 },
+    { id: "al", label: "均線多頭排列", desc: "MA20 > MA60 > MA120", def: "off",
+      test: s => s.al == null ? null : s.al === 1 },
+    { id: "yoy", label: "月營收年增", desc: "最新月營收高於去年同月", def: "off",
+      test: s => s.rev?.yoy == null ? null : s.rev.yoy > 0 },
+  ];
+  const SC_DEFAULT = Object.fromEntries(SC_CONDS.map(c => [c.id, c.def]));
+  const scState = { mode: { ...SC_DEFAULT, ...store.get("scMode", {}) }, page: 0 };
+
+  function renderScreenConds() {
+    $("#screen-conds").innerHTML = SC_CONDS.map(c => `<div class="sc-cond">
+      <div><div class="sc-label">${c.label}</div><div class="muted">${c.desc}</div></div>
+      <div class="seg" data-id="${c.id}">${[["must", "必要"], ["plus", "加分"], ["off", "不用"]].map(([v, t]) =>
+        `<button data-v="${v}" class="${scState.mode[c.id] === v ? "on " + v : ""}">${t}</button>`).join("")}</div>
+    </div>`).join("");
+  }
+  function renderScreen() {
+    const must = SC_CONDS.filter(c => scState.mode[c.id] === "must");
+    const plus = SC_CONDS.filter(c => scState.mode[c.id] === "plus");
+    const used = [...must, ...plus];
+    const mk = $("#sc-market").value;
+    const res = [];
+    for (const s of state.stocks) {
+      if (mk && s.m !== mk) continue;
+      const r = Object.fromEntries(used.map(c => [c.id, c.test(s)]));
+      if (!must.every(c => r[c.id] === true)) continue;
+      res.push({ s, r, score: plus.filter(c => r[c.id] === true).length });
+    }
+    res.sort((a, b) => b.score - a.score || (b.s.pct ?? -99) - (a.s.pct ?? -99) || a.s.c.localeCompare(b.s.c));
+    const pages = Math.max(1, Math.ceil(res.length / PAGE));
+    scState.page = Math.min(scState.page, pages - 1);
+    const mark = v => v === true ? '<span class="ok">✓</span>' : v === false ? '<span class="no">✗</span>' : '<span class="muted">?</span>';
+    $("#sc-head").innerHTML = `<th>#</th><th>代號</th><th>名稱</th><th>產業</th><th class="r">收盤</th><th class="r">漲跌幅</th>`
+      + `<th class="r">加分</th>` + used.map(c => `<th class="c" title="${c.desc}">${c.label}<br><span class="tag ${scState.mode[c.id]}">${scState.mode[c.id] === "must" ? "必要" : "加分"}</span></th>`).join("");
+    $("#sc-table tbody").innerHTML = res.slice(scState.page * PAGE, (scState.page + 1) * PAGE).map((x, i) => `<tr data-c="${x.s.c}">
+      <td class="muted">${scState.page * PAGE + i + 1}</td><td>${x.s.c}</td><td>${esc(x.s.n)}</td><td>${esc(x.s.ind)}</td>
+      <td class="r ${cls(x.s.chg)}">${fmt(x.s.p)}</td>
+      <td class="r ${cls(x.s.pct)}">${x.s.pct == null ? "—" : sign(x.s.pct) + fmt(x.s.pct) + "%"}</td>
+      <td class="r"><b>${x.score}</b><span class="muted">/${plus.length}</span></td>
+      ${used.map(c => `<td class="c">${mark(x.r[c.id])}</td>`).join("")}
+    </tr>`).join("") || `<tr><td colspan="${7 + used.length}" class="muted" style="text-align:center;padding:30px">${used.length ? "沒有符合必要條件的股票" : "請至少選一個條件"}</td></tr>`;
+    $("#sc-count").textContent = `符合 ${res.length} 檔`;
+    $("#sc-pageinfo").textContent = `${scState.page + 1} / ${pages}`;
+    $("#sc-prev").disabled = scState.page === 0;
+    $("#sc-next").disabled = scState.page >= pages - 1;
+  }
+  function setScMode(mode) {
+    scState.mode = mode; scState.page = 0;
+    store.set("scMode", mode);
+    renderScreenConds(); renderScreen();
+  }
+
   // ---------------------------------------------------------------- 搜尋建議
   let selIdx = -1;
   function renderSuggest() {
@@ -421,6 +489,7 @@
     $("#tab-list").hidden = t !== "list";
     $("#tab-calendar").hidden = t !== "calendar";
     $("#tab-rank").hidden = t !== "rank";
+    $("#tab-screen").hidden = t !== "screen";
   }
 
   function bind() {
@@ -466,6 +535,19 @@
     ["#rk-metric", "#rk-market", "#rk-ind", "#rk-order", "#rk-al"].forEach(id => $(id).onchange = () => {
       if (id === "#rk-metric") store.set("rkMetric", $(id).value);
       renderRank();
+    });
+    $("#screen-conds").addEventListener("click", e => {
+      const b = e.target.closest(".seg button");
+      if (b) setScMode({ ...scState.mode, [b.parentElement.dataset.id]: b.dataset.v });
+    });
+    $("#sc-reset").onclick = () => setScMode({ ...SC_DEFAULT });
+    $("#sc-allplus").onclick = () => setScMode(Object.fromEntries(SC_CONDS.map(c => [c.id, "plus"])));
+    $("#sc-market").onchange = () => { scState.page = 0; renderScreen(); };
+    $("#sc-prev").onclick = () => { scState.page--; renderScreen(); };
+    $("#sc-next").onclick = () => { scState.page++; renderScreen(); };
+    $("#sc-table tbody").addEventListener("click", e => {
+      const tr = e.target.closest("tr[data-c]");
+      if (tr) openStock(tr.dataset.c);
     });
     $("#rank-grid").addEventListener("click", e => {
       const li = e.target.closest("li[data-c]");

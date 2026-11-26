@@ -9,6 +9,7 @@
 輸出：
   data/stocks.json          個股清單＋最新行情＋最新營收（含實際公布日）＋發行股數
   data/revenue_dates.json   每家公司各月份營收的「實際公布日」紀錄（每天執行時偵測到新資料即記錄當天日期）
+  data/revenue_history.json 每家公司的歷月營收（從開始執行起逐月累積）
   data/prices/{代號}.json    日K資料 [[yyyymmdd, 開, 高, 低, 收, 成交張數], ...]
   data/prices/_meta.json     已抓取的交易日清單
 
@@ -112,6 +113,7 @@ def fetch_companies():
         revenue[c] = {
             "ym": roc_ym(r["資料年月"]),
             "rev": num(r["營業收入-當月營收"]),
+            "_prev": num(r["營業收入-上月營收"]),
             "mom": num(r["營業收入-上月比較增減(%)"]),
             "yoy": num(r["營業收入-去年同月增減(%)"]),
             "cum": num(r["累計營業收入-當月累計營收"]),
@@ -137,6 +139,71 @@ def deadline_for(ym: str) -> dt.date:
     while d.weekday() >= 5:
         d += dt.timedelta(days=1)
     return d
+
+
+def fetch_eps() -> dict:
+    """最新已公布的累計基本每股盈餘：{代號: {"y": 年(西元), "q": 季, "v": EPS}}"""
+    out = {}
+    try:
+        for r in get_json("https://openapi.twse.com.tw/v1/opendata/t187ap14_L"):
+            v = num(r.get("基本每股盈餘(元)"))
+            if v is not None:
+                out[r["公司代號"].strip()] = {"y": int(r["年度"]) + 1911, "q": int(r["季別"]), "v": v}
+        for r in get_json("https://www.tpex.org.tw/openapi/v1/mopsfin_t187ap14_O"):
+            v = num(r.get("基本每股盈餘"))
+            if v is not None:
+                out[r["SecuritiesCompanyCode"].strip()] = {"y": int(r["Year"]) + 1911, "q": int(r["季別"]), "v": v}
+    except Exception as e:  # noqa: BLE001  EPS 抓不到不影響其他資料
+        log(f"  ! EPS 資料取得失敗：{e}")
+    log(f"EPS 筆數：{len(out)}")
+    return out
+
+
+def prev_ym(ym: str) -> str:
+    y, m = map(int, ym.split("-"))
+    y, m = (y - 1, 12) if m == 1 else (y, m - 1)
+    return f"{y}-{m:02d}"
+
+
+def update_revenue_history(revenue: dict) -> dict:
+    """累積每月營收（官方開放資料只提供最新一期與上月，所以從開始執行起逐月記錄）。"""
+    path = DATA / "revenue_history.json"
+    hist = json.loads(path.read_text("utf-8")) if path.exists() else {}
+    for c, r in revenue.items():
+        h = hist.setdefault(c, {})
+        if r["rev"] is not None:
+            h[r["ym"]] = r["rev"]
+        pv = r.pop("_prev", None)
+        if pv is not None:
+            h.setdefault(prev_ym(r["ym"]), pv)
+    path.write_text(json.dumps(hist, separators=(",", ":"), sort_keys=True), "utf-8")
+    return hist
+
+
+def three_month_high(h: dict, ym: str):
+    """最近三個月營收是否「每個月都創下收錄期間新高」。資料不足（需連續且至少 4 個月）回傳 None。"""
+    months = [ym, prev_ym(ym), prev_ym(prev_ym(ym))]
+    if any(m not in h or h[m] is None for m in months):
+        return None
+    earlier = sorted(m for m in h if m < months[-1] and h[m] is not None)
+    if not earlier:
+        return None
+    best = max(h[m] for m in earlier)
+    for m in reversed(months):  # 由舊到新逐月比較
+        if h[m] <= best:
+            return 0
+        best = h[m]
+    return 1
+
+
+def tick(p: float) -> float:
+    return 0.01 if p < 10 else 0.05 if p < 50 else 0.1 if p < 100 else 0.5 if p < 500 else 1 if p < 1000 else 5
+
+
+def limit_up(prev: float) -> float:
+    lim = prev * 1.1
+    t = tick(lim)
+    return round(int(lim / t + 1e-9) * t, 2)
 
 
 def update_revenue_dates(revenue: dict) -> dict:
@@ -289,7 +356,7 @@ def update_prices(companies: dict, backfill_days: int):
 
 
 # ---------------------------------------------------------------- 主程式
-def build_stocks(companies, revenue, rev_dates):
+def build_stocks(companies, revenue, rev_dates, rev_hist, eps, last_date):
     out = []
     for c in sorted(companies):
         co = dict(companies[c])
@@ -308,10 +375,24 @@ def build_stocks(companies, revenue, rev_dates):
                 ma = {n: round(sum(closes[-n:]) / n, 2) for n in (20, 60, 120)}
                 co["ma"] = [ma[20], ma[60], ma[120]]
                 co["al"] = 1 if ma[20] > ma[60] > ma[120] else -1 if ma[20] < ma[60] < ma[120] else 0
+            # 條件選股用的技術面旗標（只對最新交易日有成交的個股計算）
+            if last_date and str(last[0]) == last_date and len(rows) >= 21:
+                cl = [r[4] for r in rows]
+                c0 = cl[-1]
+                co["f"] = {
+                    "lu": int(c0 >= limit_up(cl[-2]) - 1e-6),                                 # 收盤漲停
+                    "a3": int(all(c0 > sum(cl[-n:]) / n for n in (5, 10, 20))),               # 站上 5/10/20 日均線
+                    "h20": int(c0 > max(cl[-20:-1])),                                          # 收盤創近 20 日新高
+                }
         r = revenue.get(c)
         if r:
             co["rev"] = r
             co["rev"]["date"] = rev_dates.get(c, {}).get(r["ym"])
+            r3 = three_month_high(rev_hist.get(c, {}), r["ym"])
+            if r3 is not None:
+                co["rev"]["h3"] = r3
+        if c in eps:
+            co["eps"] = eps[c]
         if not co.get("sh"):
             co.pop("sh", None)
         out.append(co)
@@ -328,13 +409,16 @@ def main():
     PRICES.mkdir(exist_ok=True)
     companies, revenue = fetch_companies()
     rev_dates = update_revenue_dates(revenue)
+    rev_hist = update_revenue_history(revenue)
+    eps = fetch_eps()
     meta = {"dates": []}
     if not args.skip_prices:
         meta = update_prices(companies, args.backfill_days)
     elif (PRICES / "_meta.json").exists():
         meta = json.loads((PRICES / "_meta.json").read_text())
 
-    stocks = build_stocks(companies, revenue, rev_dates)
+    last_date = meta["dates"][-1] if meta.get("dates") else None
+    stocks = build_stocks(companies, revenue, rev_dates, rev_hist, eps, last_date)
     payload = {
         "updated": now_tw().strftime("%Y-%m-%d %H:%M"),
         "lastTradeDate": meta["dates"][-1] if meta.get("dates") else None,
